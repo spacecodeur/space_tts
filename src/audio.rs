@@ -3,6 +3,8 @@ use cpal::traits::{DeviceTrait, StreamTrait};
 use crossbeam_channel::Sender;
 use rubato::Resampler;
 
+use crate::warn;
+
 pub struct CaptureConfig {
     pub sample_rate: u32,
     pub channels: u16,
@@ -22,7 +24,7 @@ pub fn start_capture(
     let stream_config: cpal::StreamConfig = config.into();
 
     let err_fn = |err: cpal::StreamError| {
-        eprintln!("Audio stream error: {err}");
+        warn!("Audio stream error: {err}");
     };
 
     let stream = device
@@ -130,7 +132,7 @@ pub fn create_resampler(
                     }
                 }
                 Err(e) => {
-                    eprintln!("Resample error: {e}");
+                    warn!("Resample error: {e}");
                 }
             }
 

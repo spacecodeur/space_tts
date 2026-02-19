@@ -1,12 +1,14 @@
 mod audio;
 mod hotkey;
 mod inject;
+mod log;
 mod transcribe;
 mod tui;
 mod vad;
 
 use anyhow::Result;
 use inject::TextInjector;
+use log::{debug, info};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -18,14 +20,13 @@ fn check_input_group() {
         Ok(o) => {
             let groups = String::from_utf8_lossy(&o.stdout);
             if !groups.split_whitespace().any(|g| g == "input") {
-                eprintln!("WARNING: User is NOT in the 'input' group.");
-                eprintln!("  This will block evdev hotkey and dotool uinput access.");
-                eprintln!("  Fix: sudo usermod -aG input $USER && log out/in");
-                eprintln!();
+                warn!("User is NOT in the 'input' group.");
+                warn!("  This will block evdev hotkey and dotool uinput access.");
+                warn!("  Fix: sudo usermod -aG input $USER && log out/in");
             }
         }
         Err(_) => {
-            eprintln!("WARNING: Could not check group membership (id command failed).");
+            warn!("Could not check group membership (id command failed).");
         }
     }
 
@@ -37,16 +38,21 @@ fn check_input_group() {
     {
         Ok(_) => {}
         Err(e) => {
-            eprintln!("WARNING: Cannot open /dev/uinput: {e}");
-            eprintln!("  dotool text injection will fail.");
-            eprintln!("  Fix: sudo usermod -aG input $USER && log out/in");
-            eprintln!();
+            warn!("Cannot open /dev/uinput: {e}");
+            warn!("  dotool text injection will fail.");
+            warn!("  Fix: sudo usermod -aG input $USER && log out/in");
         }
     }
 }
 
 fn main() -> Result<()> {
-    eprintln!("Space STT — Local Speech-to-Text Terminal Injector");
+    // Parse --debug flag
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--debug") {
+        log::set_debug(true);
+    }
+
+    info!("Space STT — Local Speech-to-Text Terminal Injector");
     check_input_group();
 
     // 1. Run TUI setup
@@ -60,16 +66,15 @@ fn main() -> Result<()> {
         .to_string();
     let device_name = &config.device_name;
 
-    eprintln!("--- Configuration ---");
-    eprintln!("  Device:   {device_name}");
-    eprintln!("  Model:    {model_name} ({})", config.model_path.display());
-    eprintln!("  Hotkey:   {:?}", config.hotkey);
-    eprintln!("  Language: {}", config.language);
-    eprintln!("  XKB:      {}", config.xkb_layout);
-    eprintln!("---------------------");
+    info!("  Device:   {device_name}");
+    info!("  Model:    {model_name}");
+    info!("  Hotkey:   {:?}", config.hotkey);
+    info!("  Language: {}", config.language);
+    debug!("  XKB:      {}", config.xkb_layout);
+    debug!("  Model path: {}", config.model_path.display());
 
     // 2. Set up transcription thread with warm-up
-    eprintln!("Loading model {model_name}...");
+    info!("Loading model {model_name}...");
 
     let (seg_tx, seg_rx) = crossbeam_channel::bounded::<Vec<i16>>(4);
     let (text_tx, text_rx) = crossbeam_channel::bounded::<String>(4);
@@ -83,16 +88,16 @@ fn main() -> Result<()> {
             let mut transcriber = match transcribe::Transcriber::new(&model_path, &language) {
                 Ok(t) => t,
                 Err(e) => {
-                    eprintln!("Failed to load model: {e}");
+                    info!("Failed to load model: {e}");
                     return;
                 }
             };
 
             // Warm-up: transcribe 1s of silence to init GPU graph
-            eprintln!("Warming up whisper...");
+            debug!("Warming up whisper...");
             let silence = vec![0i16; 16000];
             let _ = transcriber.transcribe(&silence);
-            eprintln!("Warm-up complete.");
+            debug!("Warm-up complete.");
 
             // Process segments from channel
             for segment in seg_rx {
@@ -103,13 +108,13 @@ fn main() -> Result<()> {
                         }
                     }
                     Ok(_) => {} // empty transcription, skip
-                    Err(e) => eprintln!("Transcription error: {e}"),
+                    Err(e) => debug!("Transcription error: {e}"),
                 }
             }
         })?;
 
     // 3. Start audio capture
-    eprintln!("Starting audio capture on {device_name}...");
+    debug!("Starting audio capture on {device_name}...");
 
     let (audio_tx, audio_rx) = crossbeam_channel::bounded::<Vec<i16>>(64);
     let (_stream, capture_config) = audio::start_capture(&config.device, audio_tx)?;
@@ -133,7 +138,7 @@ fn main() -> Result<()> {
     })?;
 
     // 8. Main processing loop
-    eprintln!("Ready. Hold push-to-talk key to speak.");
+    info!("Ready! Press {:?} to toggle listening.", config.hotkey);
 
     let mut voice_detector = vad::VoiceDetector::new()?;
     let mut was_listening = false;
@@ -160,12 +165,12 @@ fn main() -> Result<()> {
         // PTT release detection: discard incomplete segment
         if was_listening && !listening {
             voice_detector.reset();
-            eprintln!("[PAUSED] (processed {listening_chunks} audio chunks while listening)");
+            debug!("[PAUSED] (processed {listening_chunks} audio chunks while listening)");
             listening_chunks = 0;
         }
 
         if !was_listening && listening {
-            eprintln!("[LISTENING]");
+            debug!("[LISTENING]");
             listening_chunks = 0;
         }
 
@@ -174,7 +179,7 @@ fn main() -> Result<()> {
         if !listening {
             // Log audio flow periodically to confirm capture works
             if chunk_count % 500 == 0 {
-                eprintln!(
+                debug!(
                     "  (audio flowing: {chunk_count} chunks received, {} samples/chunk)",
                     chunk.len()
                 );
@@ -188,14 +193,14 @@ fn main() -> Result<()> {
         let resampled = resample(&chunk);
         if resampled.is_empty() {
             if listening_chunks % 100 == 0 {
-                eprintln!("  WARNING: resampler producing empty output");
+                debug!("  WARNING: resampler producing empty output");
             }
             continue;
         }
 
         // Log first chunk to confirm pipeline works
         if listening_chunks == 1 {
-            eprintln!(
+            debug!(
                 "  Audio chunk: {} samples -> resampled to {} samples",
                 chunk.len(),
                 resampled.len()
@@ -208,27 +213,27 @@ fn main() -> Result<()> {
         // Send completed segments for transcription
         for segment in segments {
             let duration_ms = segment.len() as f64 / 16.0; // 16 samples per ms at 16kHz
-            eprintln!(
+            debug!(
                 "[TRANSCRIBING...] segment: {} samples ({:.0}ms)",
                 segment.len(),
                 duration_ms
             );
             if seg_tx.try_send(segment).is_err() {
-                eprintln!("Transcription busy, segment dropped.");
+                debug!("Transcription busy, segment dropped.");
             }
         }
 
         // Check for transcription results (non-blocking)
         while let Ok(text) = text_rx.try_recv() {
-            eprintln!("[RESULT] \"{}\"", text);
+            info!("[RESULT] \"{}\"", text);
             if let Err(e) = injector.type_text(&text) {
-                eprintln!("Injection error: {e}");
+                warn!("Injection error: {e}");
             }
         }
     }
 
     // 9. Graceful shutdown
-    eprintln!("Shutting down...");
+    info!("Shutting down...");
 
     // Drop stream (stops capture) and senders (signal threads to exit)
     drop(_stream);
@@ -243,12 +248,12 @@ fn main() -> Result<()> {
         let _ = done_tx.send(());
     });
     if done_rx.recv_timeout(Duration::from_secs(10)).is_err() {
-        eprintln!("Transcription thread did not stop within 10s, exiting anyway.");
+        warn!("Transcription thread did not stop within 10s, exiting anyway.");
     }
 
     // Drop injector (kills dotool)
     drop(injector);
 
-    eprintln!("Shutdown complete.");
+    info!("Shutdown complete.");
     Ok(())
 }

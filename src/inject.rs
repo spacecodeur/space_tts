@@ -2,6 +2,8 @@ use anyhow::{Context, Result, bail};
 use std::io::Write;
 use std::process::{Child, Command, Stdio};
 
+use crate::warn;
+
 pub trait TextInjector {
     fn type_text(&mut self, text: &str) -> Result<()>;
 }
@@ -82,7 +84,7 @@ impl TextInjector for Injector {
         })();
 
         if write_result.is_err() {
-            eprintln!("dotool pipe broken, respawning...");
+            warn!("dotool pipe broken, respawning...");
             self.respawn()?;
             let stdin = self
                 .child

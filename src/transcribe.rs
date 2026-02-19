@@ -1,5 +1,7 @@
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
+
+use crate::warn;
 use whisper_rs::{
     FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperState,
     convert_integer_to_float_audio,
@@ -44,7 +46,7 @@ impl Transcriber {
         params.set_initial_prompt(initial_prompt(&self.language));
 
         if let Err(e) = self.state.full(params, &audio_f32) {
-            eprintln!("Transcription error: {e}");
+            warn!("Transcription error: {e}");
             return Ok(String::new());
         }
 
@@ -52,7 +54,7 @@ impl Transcriber {
         for segment in self.state.as_iter() {
             match segment.to_str_lossy() {
                 Ok(s) => text.push_str(&s),
-                Err(e) => eprintln!("Segment text error: {e}"),
+                Err(e) => warn!("Segment text error: {e}"),
             }
         }
 

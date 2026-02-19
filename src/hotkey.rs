@@ -3,6 +3,9 @@ use evdev::{Device, EventType, KeyCode};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use crate::log::debug;
+use crate::warn;
+
 /// List all keyboard-like evdev devices (filtering out non-keyboards).
 fn find_keyboards() -> Vec<(std::path::PathBuf, String)> {
     evdev::enumerate()
@@ -37,9 +40,7 @@ pub fn listen_all_keyboards(key: KeyCode, is_listening: Arc<AtomicBool>) -> Resu
     let keyboards = find_keyboards();
 
     if keyboards.is_empty() {
-        eprintln!(
-            "WARNING: No keyboard devices found for hotkey. Is the user in the 'input' group?"
-        );
+        warn!("No keyboard devices found for hotkey. Is the user in the 'input' group?");
         return Ok(());
     }
 
@@ -57,12 +58,12 @@ pub fn listen_all_keyboards(key: KeyCode, is_listening: Arc<AtomicBool>) -> Resu
                 let mut device = match Device::open(&path) {
                     Ok(d) => d,
                     Err(e) => {
-                        eprintln!("Cannot open {path_display} ({name}): {e}");
+                        warn!("Cannot open {path_display} ({name}): {e}");
                         return;
                     }
                 };
 
-                eprintln!("Hotkey listener on: {name} ({path_display})");
+                debug!("Hotkey listener on: {name} ({path_display})");
 
                 loop {
                     match device.fetch_events() {
@@ -80,7 +81,7 @@ pub fn listen_all_keyboards(key: KeyCode, is_listening: Arc<AtomicBool>) -> Resu
                             }
                         }
                         Err(e) => {
-                            eprintln!("Hotkey device lost ({name}): {e}");
+                            warn!("Hotkey device lost ({name}): {e}");
                             return;
                         }
                     }
