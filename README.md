@@ -46,8 +46,11 @@ The script auto-detects your package manager (dnf, apt, pacman).
 Le client est léger : il capture l'audio, détecte la voix, et envoie les segments au serveur distant via SSH. Il injecte le texte transcrit dans la fenêtre active via dotool. **Pas besoin de whisper-rs ni de GPU.**
 
 ```bash
-# Installation
+# Installation (deps + dotool + build)
 ./setup.sh install client
+
+# Build seul (si deps déjà installées)
+cargo build --release -p space_tts_client
 
 # Lancement
 ./target/release/space_tts_client
@@ -110,6 +113,10 @@ Le serveur charge un modèle Whisper et fait la transcription (GPU ou CPU). En p
 ```bash
 # Installation (deps + CUDA optionnel + modèle + build)
 ./setup.sh install server
+
+# Build seul (si deps déjà installées)
+cargo build --release -p space_tts_server
+cargo build --release -p space_tts_server --features cuda   # avec GPU
 
 # Vérifier que les modèles sont détectés
 ./target/release/space_tts_server --list-models
