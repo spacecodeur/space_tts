@@ -1,8 +1,31 @@
 # Space STT — Local Speech-to-Text Terminal Injector
 
-Single Rust binary that captures microphone audio, transcribes speech locally via whisper.cpp, and injects text into the focused window using dotool.
+> **Note:** This project was largely written through vibecoding with an LLM (Claude).
 
-## System Prerequisites
+Single Rust binary that captures microphone audio, transcribes speech locally via whisper.cpp, and injects text into the focused window using dotool. Designed for Linux (Wayland/X11).
+
+## Features
+
+- **Local & private** — everything runs on your machine, no cloud API
+- **CUDA GPU acceleration** — optional, for fast transcription on NVIDIA GPUs
+- **Push-to-talk hotkey** — toggle recording with a configurable key (F2–F12, ScrollLock, Pause)
+- **Voice Activity Detection** — automatically segments speech from silence
+- **Whisper hallucination filtering** — strips phantom "Merci d'avoir regard la vid o" artifacts
+- **Auto-detected XKB layout** — accented characters work out of the box (e.g. `us+altgr-intl`)
+- **TUI setup** — interactive model and hotkey selection at startup
+
+## Quick Setup
+
+An automated setup script handles dependencies, dotool, model download, and build:
+
+```bash
+./setup.sh install     # install everything
+./setup.sh uninstall   # remove everything cleanly
+```
+
+The script auto-detects your package manager (dnf, apt, pacman).
+
+## Manual Setup
 
 ### Fedora (dnf)
 
@@ -45,16 +68,16 @@ sudo apt install -y nvidia-cuda-toolkit libcublas-dev
 
 ### Whisper Models
 
-Download at least one model into `~/.local/share/space-stt/models/`:
+Download at least one model into the `models/` directory at the project root:
 
 ```bash
-mkdir -p ~/.local/share/space-stt/models
+mkdir -p models
 # Pick one:
-wget -P ~/.local/share/space-stt/models https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin    # ~75 MB  — laptop CPU
-wget -P ~/.local/share/space-stt/models https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin    # ~142 MB — good balance
-wget -P ~/.local/share/space-stt/models https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin   # ~466 MB — mid-range GPU
-wget -P ~/.local/share/space-stt/models https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin  # ~1.5 GB — strong GPU
-wget -P ~/.local/share/space-stt/models https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin # ~3.1 GB — best quality
+wget -P models https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin    # ~75 MB  — laptop CPU
+wget -P models https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin    # ~142 MB — CPU
+wget -P models https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin   # ~466 MB — mid-range GPU
+wget -P models https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin  # ~1.5 GB — strong GPU
+wget -P models https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin # ~3.1 GB — best quality
 ```
 
 ## Build

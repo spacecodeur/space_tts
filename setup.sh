@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-MODELS_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/space-stt/models"
+MODELS_DIR="$(cd "$(dirname "$0")" && pwd)/models"
 DOTOOL_REPO="https://git.sr.ht/~geb/dotool"
 HF_BASE="https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
 
@@ -369,6 +369,7 @@ usage() {
     echo "Commands:"
     echo "  install    Install all dependencies and build"
     echo "  uninstall  Remove everything cleanly"
+    echo "  model      Download a Whisper model"
 }
 
 case "${1:-}" in
@@ -377,6 +378,9 @@ case "${1:-}" in
         ;;
     uninstall)
         do_uninstall
+        ;;
+    model)
+        download_model
         ;;
     *)
         usage

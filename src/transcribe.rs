@@ -149,17 +149,23 @@ fn filter_hallucinations(text: &str) -> String {
 }
 
 pub fn default_models_dir() -> PathBuf {
-    dirs_or_default("space-stt/models")
-}
-
-fn dirs_or_default(subpath: &str) -> PathBuf {
-    if let Some(data_dir) = std::env::var_os("XDG_DATA_HOME") {
-        PathBuf::from(data_dir).join(subpath)
-    } else if let Some(home) = std::env::var_os("HOME") {
-        PathBuf::from(home).join(".local/share").join(subpath)
-    } else {
-        PathBuf::from(".local/share").join(subpath)
+    // Look for models/ directory relative to the executable, then fall back to CWD
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            let dir = parent.join("models");
+            if dir.exists() {
+                return dir;
+            }
+            // Also check two levels up (target/release/../.. = project root)
+            if let Some(project_root) = parent.parent().and_then(|p| p.parent()) {
+                let dir = project_root.join("models");
+                if dir.exists() {
+                    return dir;
+                }
+            }
+        }
     }
+    PathBuf::from("models")
 }
 
 #[cfg(test)]
