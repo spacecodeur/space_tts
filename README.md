@@ -30,8 +30,11 @@ CLIENT (laptop)                             SERVEUR (GPU)
 An automated setup script handles dependencies, dotool, model download, and build:
 
 ```bash
-./setup.sh install     # install everything
-./setup.sh uninstall   # remove everything cleanly
+./setup.sh install           # install everything (client + server)
+./setup.sh install client    # client only (hotkey, audio, dotool)
+./setup.sh install server    # server only (whisper, CUDA, models)
+./setup.sh uninstall         # remove everything cleanly
+./setup.sh model             # download a Whisper model
 ```
 
 The script auto-detects your package manager (dnf, apt, pacman).

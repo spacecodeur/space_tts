@@ -30,9 +30,45 @@ project_dir() {
 
 # --- System packages ---
 
+install_client_deps() {
+    local pm="$1"
+    info "Installing client build dependencies ($pm)..."
+
+    case "$pm" in
+        dnf)
+            sudo dnf install -y pkg-config alsa-lib-devel
+            ;;
+        apt)
+            sudo apt-get update
+            sudo apt-get install -y pkg-config libasound2-dev
+            ;;
+        pacman)
+            sudo pacman -S --needed --noconfirm pkgconf alsa-lib
+            ;;
+    esac
+}
+
+install_server_deps() {
+    local pm="$1"
+    info "Installing server build dependencies ($pm)..."
+
+    case "$pm" in
+        dnf)
+            sudo dnf install -y cmake gcc gcc-c++ pkg-config
+            ;;
+        apt)
+            sudo apt-get update
+            sudo apt-get install -y cmake gcc g++ pkg-config
+            ;;
+        pacman)
+            sudo pacman -S --needed --noconfirm cmake gcc pkgconf
+            ;;
+    esac
+}
+
 install_build_deps() {
     local pm="$1"
-    info "Installing build dependencies ($pm)..."
+    info "Installing all build dependencies ($pm)..."
 
     case "$pm" in
         dnf)
@@ -204,6 +240,7 @@ download_model() {
 # --- Build ---
 
 build_project() {
+    local target="${1:-}"
     local dir
     dir=$(project_dir)
 
@@ -211,18 +248,33 @@ build_project() {
         err "Cargo.toml not found in $dir."
     fi
 
-    local build_flags="--release"
-    if command -v nvcc &>/dev/null; then
-        ask "CUDA detected. Build with GPU acceleration? [Y/n]"
-        if [[ ! "$REPLY" =~ ^[nN]$ ]]; then
-            build_flags="--release --features cuda"
-        fi
-    fi
-
-    info "Building space-stt ($build_flags)..."
     cd "$dir"
-    cargo build $build_flags
-    info "Build complete: $dir/target/release/space-stt"
+
+    case "$target" in
+        client)
+            info "Building space_tts_client..."
+            cargo build --release -p space_tts_client
+            info "Build complete: $dir/target/release/space_tts_client"
+            ;;
+        server)
+            local build_flags="--release -p space_tts_server"
+            if [ "${CUDA_ENABLED:-0}" = "1" ]; then
+                build_flags="$build_flags --features cuda"
+            fi
+            info "Building space_tts_server ($build_flags)..."
+            cargo build $build_flags
+            info "Build complete: $dir/target/release/space_tts_server"
+            ;;
+        *)
+            local build_flags="--release --workspace"
+            if [ "${CUDA_ENABLED:-0}" = "1" ]; then
+                build_flags="$build_flags --features space_tts_server/cuda"
+            fi
+            info "Building workspace ($build_flags)..."
+            cargo build $build_flags
+            info "Build complete."
+            ;;
+    esac
 }
 
 # --- Uninstall ---
@@ -317,9 +369,9 @@ do_uninstall() {
 
 # --- Install ---
 
-do_install() {
+do_install_client() {
     echo "========================================="
-    echo "  Space STT — Setup"
+    echo "  Space TTS — Client Setup"
     echo "========================================="
     echo
 
@@ -328,16 +380,84 @@ do_install() {
     info "Detected package manager: $pm"
     echo
 
+    install_rust
+    install_client_deps "$pm"
+    install_dotool_deps "$pm"
+    install_dotool
+    setup_input_group
+
+    echo
+    build_project client
+
+    echo
+    echo "========================================="
+    info "Client setup complete!"
+    echo
+    echo "  Run:  ./target/release/space_tts_client"
+    echo
+    if ! id -nG "$USER" | grep -qw input; then
+        warn "Remember to log out/in for the 'input' group to take effect."
+    fi
+    echo "========================================="
+}
+
+do_install_server() {
+    echo "========================================="
+    echo "  Space TTS — Server Setup"
+    echo "========================================="
+    echo
+
+    local pm
+    pm=$(detect_pkg_manager)
+    info "Detected package manager: $pm"
+    echo
+
+    install_rust
+    install_server_deps "$pm"
+
+    echo
+    ask "Install CUDA support for GPU acceleration? [y/N]"
+    if [[ "$REPLY" =~ ^[yY]$ ]]; then
+        install_cuda "$pm"
+        CUDA_ENABLED=1
+    fi
+
+    echo
+    download_model
+
+    echo
+    build_project server
+
+    echo
+    echo "========================================="
+    info "Server setup complete!"
+    echo
+    echo "  Run:  ./target/release/space_tts_server --list-models"
+    echo "========================================="
+}
+
+do_install() {
+    echo "========================================="
+    echo "  Space TTS — Full Setup"
+    echo "========================================="
+    echo
+
+    local pm
+    pm=$(detect_pkg_manager)
+    info "Detected package manager: $pm"
+    echo
+
+    install_rust
     install_build_deps "$pm"
     install_dotool_deps "$pm"
     install_dotool
-    install_rust
     setup_input_group
 
     echo
     ask "Install CUDA support for GPU acceleration? [y/N]"
     if [[ "$REPLY" =~ ^[yY]$ ]]; then
         install_cuda "$pm"
+        CUDA_ENABLED=1
     fi
 
     echo
@@ -350,10 +470,8 @@ do_install() {
     echo "========================================="
     info "Setup complete!"
     echo
-    echo "  Run:  cargo run --release"
-    if command -v nvcc &>/dev/null; then
-        echo "  GPU:  cargo run --release --features cuda"
-    fi
+    echo "  Client:  ./target/release/space_tts_client"
+    echo "  Server:  ./target/release/space_tts_server --list-models"
     echo
     if ! id -nG "$USER" | grep -qw input; then
         warn "Remember to log out/in for the 'input' group to take effect."
@@ -364,17 +482,24 @@ do_install() {
 # --- Entry point ---
 
 usage() {
-    echo "Usage: $0 <command>"
+    echo "Usage: $0 <command> [target]"
     echo
     echo "Commands:"
-    echo "  install    Install all dependencies and build"
-    echo "  uninstall  Remove everything cleanly"
-    echo "  model      Download a Whisper model"
+    echo "  install           Install everything (client + server)"
+    echo "  install client    Install client only (hotkey, audio, dotool)"
+    echo "  install server    Install server only (whisper, CUDA, models)"
+    echo "  uninstall         Remove everything cleanly"
+    echo "  model             Download a Whisper model"
 }
 
 case "${1:-}" in
     install)
-        do_install
+        case "${2:-}" in
+            client)  do_install_client ;;
+            server)  do_install_server ;;
+            "")      do_install ;;
+            *)       usage ;;
+        esac
         ;;
     uninstall)
         do_uninstall
