@@ -364,23 +364,21 @@ do_install() {
 # --- Entry point ---
 
 usage() {
-    echo "Usage: $0 [install|uninstall]"
+    echo "Usage: $0 <command>"
     echo
-    echo "  install    Install all dependencies and build (default)"
+    echo "Commands:"
+    echo "  install    Install all dependencies and build"
     echo "  uninstall  Remove everything cleanly"
 }
 
-case "${1:-install}" in
+case "${1:-}" in
     install)
         do_install
         ;;
     uninstall)
         do_uninstall
         ;;
-    -h|--help|help)
-        usage
-        ;;
     *)
-        err "Unknown command: $1 (use 'install' or 'uninstall')"
+        usage
         ;;
 esac
