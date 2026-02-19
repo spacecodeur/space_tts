@@ -4,17 +4,28 @@ use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use evdev::KeyCode as EvdevKeyCode;
 use ratatui::Frame;
 use ratatui::style::{Modifier, Style};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState};
+use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::inject;
+use crate::remote;
 use crate::transcribe;
 
+pub enum Backend {
+    Local {
+        model_path: PathBuf,
+    },
+    Remote {
+        ssh_target: String,
+        remote_model_path: String,
+    },
+}
+
 pub struct SetupConfig {
+    pub backend: Backend,
     pub device: cpal::Device,
     pub device_name: String,
-    pub model_path: PathBuf,
     pub hotkey: EvdevKeyCode,
     pub language: String,
     pub xkb_layout: String,
@@ -31,29 +42,14 @@ pub fn run_setup() -> Result<SetupConfig> {
         .map(|d: cpal::DeviceDescription| d.name().to_string())
         .unwrap_or_else(|_| "Default".into());
 
-    let models_dir = transcribe::default_models_dir();
-    let models = transcribe::scan_models(&models_dir)?;
-    if models.is_empty() {
-        bail!(
-            "No Whisper models found in {}.\nDownload one:\n  wget -P {} https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
-            models_dir.display(),
-            models_dir.display()
-        );
-    }
-
     let mut terminal = ratatui::init();
 
-    // Screen 1: Whisper Model
-    let model_labels: Vec<String> = models
-        .iter()
-        .map(|(name, path)| {
-            let size = std::fs::metadata(path)
-                .map(|m| format_size(m.len()))
-                .unwrap_or_default();
-            format!("{name} ({size})")
-        })
-        .collect();
-    let model_idx = match select_screen(&mut terminal, "Select Whisper Model", &model_labels) {
+    // Screen 1: Backend selection
+    let backend_choices = vec![
+        "Local (this machine)".to_string(),
+        "Remote (SSH)".to_string(),
+    ];
+    let backend_idx = match select_screen(&mut terminal, "Select Backend", &backend_choices) {
         Ok(idx) => idx,
         Err(e) => {
             ratatui::restore();
@@ -61,7 +57,85 @@ pub fn run_setup() -> Result<SetupConfig> {
         }
     };
 
-    // Screen 2: Language
+    let backend = if backend_idx == 0 {
+        // Local backend: scan local models
+        let models_dir = transcribe::default_models_dir();
+        let models = transcribe::scan_models(&models_dir)?;
+        if models.is_empty() {
+            ratatui::restore();
+            bail!(
+                "No Whisper models found in {}.\nDownload one:\n  wget -P {} https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
+                models_dir.display(),
+                models_dir.display()
+            );
+        }
+
+        let model_labels: Vec<String> = models
+            .iter()
+            .map(|(name, path)| {
+                let size = std::fs::metadata(path)
+                    .map(|m| format_size(m.len()))
+                    .unwrap_or_default();
+                format!("{name} ({size})")
+            })
+            .collect();
+        let model_idx =
+            match select_screen(&mut terminal, "Select Whisper Model", &model_labels) {
+                Ok(idx) => idx,
+                Err(e) => {
+                    ratatui::restore();
+                    return Err(e);
+                }
+            };
+
+        Backend::Local {
+            model_path: models[model_idx].1.clone(),
+        }
+    } else {
+        // Remote backend: get SSH target, then discover remote models
+        let ssh_target = match text_input_screen(
+            &mut terminal,
+            "SSH Target",
+            "user@host",
+        ) {
+            Ok(t) => t,
+            Err(e) => {
+                ratatui::restore();
+                return Err(e);
+            }
+        };
+
+        // Temporarily restore terminal to show SSH connection output
+        ratatui::restore();
+        let models = remote::list_remote_models(&ssh_target)?;
+        if models.is_empty() {
+            bail!("No Whisper models found on remote machine {ssh_target}.");
+        }
+        terminal = ratatui::init();
+
+        let model_labels: Vec<String> = models
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect();
+        let model_idx = match select_screen(
+            &mut terminal,
+            "Select Remote Model",
+            &model_labels,
+        ) {
+            Ok(idx) => idx,
+            Err(e) => {
+                ratatui::restore();
+                return Err(e);
+            }
+        };
+
+        Backend::Remote {
+            ssh_target,
+            remote_model_path: models[model_idx].1.clone(),
+        }
+    };
+
+    // Language selection
     let language_choices = vec![
         "English".to_string(),
         "Français".to_string(),
@@ -92,7 +166,7 @@ pub fn run_setup() -> Result<SetupConfig> {
         _ => "en",
     };
 
-    // Screen 3: Push-to-Talk Key
+    // Push-to-Talk Key selection
     let hotkey_choices = vec![
         "F2".to_string(),
         "F3".to_string(),
@@ -128,16 +202,68 @@ pub fn run_setup() -> Result<SetupConfig> {
         _ => EvdevKeyCode::KEY_F2,
     };
 
-    let model_path = models[model_idx].1.clone();
-
     Ok(SetupConfig {
+        backend,
         device,
         device_name,
-        model_path,
         hotkey,
         language: language.to_string(),
         xkb_layout: inject::detect_xkb_layout(),
     })
+}
+
+fn text_input_screen(
+    terminal: &mut ratatui::DefaultTerminal,
+    title: &str,
+    placeholder: &str,
+) -> Result<String> {
+    let mut input = String::new();
+
+    loop {
+        let display_text = if input.is_empty() {
+            placeholder.to_string()
+        } else {
+            input.clone()
+        };
+        let is_empty = input.is_empty();
+        let title = format!(" {title} (Enter=confirm, Esc=cancel) ");
+
+        terminal.draw(|frame: &mut Frame| {
+            let area = frame.area();
+            let style = if is_empty {
+                Style::default().add_modifier(Modifier::DIM)
+            } else {
+                Style::default()
+            };
+            let paragraph = Paragraph::new(format!("{display_text}_"))
+                .style(style)
+                .block(Block::default().borders(Borders::ALL).title(title));
+            frame.render_widget(paragraph, area);
+        })?;
+
+        if event::poll(Duration::from_millis(100))?
+            && let Event::Key(key) = event::read()?
+            && key.kind == KeyEventKind::Press
+        {
+            match key.code {
+                KeyCode::Char(c) => input.push(c),
+                KeyCode::Backspace => {
+                    input.pop();
+                }
+                KeyCode::Enter => {
+                    let trimmed = input.trim().to_string();
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    return Ok(trimmed);
+                }
+                KeyCode::Esc => {
+                    bail!("Setup cancelled by user.");
+                }
+                _ => {}
+            }
+        }
+    }
 }
 
 fn select_screen(

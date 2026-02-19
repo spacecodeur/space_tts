@@ -1,16 +1,16 @@
-# Space STT — Local Speech-to-Text Terminal Injector
+# Space STT — Speech-to-Text Terminal Injector
 
 > **Note:** This project was largely written through vibecoding with an LLM (Claude).
 
-Single Rust binary that captures microphone audio, transcribes speech locally via whisper.cpp, and injects text into the focused window using dotool. Designed for Linux (Wayland/X11).
+Single Rust binary that captures microphone audio, transcribes speech via whisper.cpp, and injects text into the focused window using dotool. Designed for Linux (Wayland/X11). Supports local transcription or remote transcription via SSH sur un serveur GPU.
 
 ## Features
 
-- **Local & private** — everything runs on your machine, no cloud API
+- **Local & remote** — transcription locale ou distante via SSH sur un serveur GPU
 - **CUDA GPU acceleration** — optional, for fast transcription on NVIDIA GPUs
 - **Push-to-talk hotkey** — toggle recording with a configurable key (F2–F12, ScrollLock, Pause)
 - **Voice Activity Detection** — automatically segments speech from silence
-- **Whisper hallucination filtering** — strips phantom "Merci d'avoir regard la vid o" artifacts
+- **Whisper hallucination filtering** — strips phantom "Merci d'avoir regardé la vidéo" artifacts
 - **Auto-detected XKB layout** — accented characters work out of the box (e.g. `us+altgr-intl`)
 - **TUI setup** — interactive model and hotkey selection at startup
 
@@ -90,10 +90,49 @@ cargo build --release
 cargo build --release --features cuda
 ```
 
-## Run
+## Usage
+
+### Mode local (tout-en-un)
+
+Le mode par défaut : capture audio, transcription et injection sur la même machine.
 
 ```bash
-cargo run --release
-# or with CUDA:
-cargo run --release --features cuda
+space-stt
+```
+
+Le TUI interactif propose de choisir le backend "Local", le modèle, la langue et la touche push-to-talk.
+
+### Mode client/serveur (SSH)
+
+Pour utiliser un laptop léger (client) avec un serveur GPU distant. Le même binaire sert des deux côtés.
+
+**Sur le serveur GPU** : installer `space-stt` et les modèles Whisper. Pas besoin de le lancer manuellement — le client le démarre automatiquement via SSH.
+
+**Sur le client** : lancer `space-stt` et choisir le backend "Remote (SSH)" dans le TUI. Il suffit d'entrer la cible SSH (ex: `user@192.168.1.34`) et le client découvrira les modèles disponibles sur le serveur.
+
+```
+CLIENT (laptop)                             SERVEUR (GPU)
+┌─────────────────────────┐                ┌──────────────────┐
+│ Audio capture (micro)   │                │                  │
+│ Resampler → 16kHz mono  │                │ Whisper (GPU)    │
+│ VAD → segments          │── SSH pipe ──→│ Transcription    │
+│ Hotkey (push-to-talk)   │← SSH pipe ───│                  │
+│ Injection (dotool)      │                │                  │
+└─────────────────────────┘                └──────────────────┘
+```
+
+Le client spawne `ssh <target> space-stt --server --model <path> --language <lang>` et communique via stdin/stdout avec un protocole binaire.
+
+**Prérequis** :
+- SSH sans mot de passe configuré (clé publique) vers le serveur
+- `space-stt` dans le `PATH` du serveur
+- Au moins un modèle Whisper (`ggml-*.bin`) dans le dossier `models/` du serveur
+
+### Commandes CLI
+
+```bash
+space-stt                                          # client TUI (mode interactif)
+space-stt --server --model <path> --language fr    # serveur (lancé automatiquement par le client via SSH)
+space-stt --list-models                            # liste les modèles locaux (name\tpath)
+space-stt --debug                                  # active les logs de debug
 ```
