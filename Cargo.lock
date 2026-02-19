@@ -1781,7 +1781,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
-name = "space-stt"
+name = "space_tts_client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -1793,7 +1793,23 @@ dependencies = [
  "evdev",
  "ratatui",
  "rubato",
+ "space_tts_common",
  "webrtc-vad",
+]
+
+[[package]]
+name = "space_tts_common"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+]
+
+[[package]]
+name = "space_tts_server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "space_tts_common",
  "whisper-rs",
 ]
 

@@ -1,8 +1,9 @@
 use anyhow::Result;
 use std::io::{BufReader, BufWriter, Write};
 
-use crate::log::{debug, info};
-use crate::protocol::{ClientMsg, ServerMsg, read_client_msg, write_server_msg};
+use space_tts_common::protocol::{ClientMsg, ServerMsg, read_client_msg, write_server_msg};
+use space_tts_common::{debug, info};
+
 use crate::transcribe::{LocalTranscriber, Transcriber};
 
 pub fn run(model_path: &str, language: &str) -> Result<()> {

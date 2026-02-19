@@ -3,7 +3,7 @@ use cpal::traits::{DeviceTrait, StreamTrait};
 use crossbeam_channel::Sender;
 use rubato::Resampler;
 
-use crate::warn;
+use space_tts_common::warn;
 
 pub struct CaptureConfig {
     pub sample_rate: u32,
@@ -49,11 +49,13 @@ pub fn start_capture(
     ))
 }
 
+pub type ResamplerFn = Box<dyn FnMut(&[i16]) -> Vec<i16>>;
+
 pub fn create_resampler(
     source_rate: u32,
     target_rate: u32,
     channels: u16,
-) -> Result<Box<dyn FnMut(&[i16]) -> Vec<i16>>> {
+) -> Result<ResamplerFn> {
     if source_rate == target_rate && channels == 1 {
         return Ok(Box::new(|samples: &[i16]| samples.to_vec()));
     }

@@ -1,0 +1,17 @@
+[package]
+name = "space_tts_client"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+space_tts_common = { path = "../common" }
+anyhow = "1.0.101"
+audioadapter-buffers = "2.0.0"
+cpal = "0.17.3"
+crossbeam-channel = "0.5.15"
+crossterm = "0.29.0"
+ctrlc = { version = "3.5.2", features = ["termination"] }
+evdev = "0.13.2"
+ratatui = "0.30.0"
+rubato = "1.0.1"
+webrtc-vad = "0.4.0"

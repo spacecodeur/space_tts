@@ -1,0 +1,13 @@
+[package]
+name = "space_tts_server"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = []
+cuda = ["whisper-rs/cuda"]
+
+[dependencies]
+space_tts_common = { path = "../common" }
+whisper-rs = "0.15.1"
+anyhow = "1.0.101"

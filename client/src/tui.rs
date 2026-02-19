@@ -5,25 +5,14 @@ use evdev::KeyCode as EvdevKeyCode;
 use ratatui::Frame;
 use ratatui::style::{Modifier, Style};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
-use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::inject;
 use crate::remote;
-use crate::transcribe;
-
-pub enum Backend {
-    Local {
-        model_path: PathBuf,
-    },
-    Remote {
-        ssh_target: String,
-        remote_model_path: String,
-    },
-}
 
 pub struct SetupConfig {
-    pub backend: Backend,
+    pub ssh_target: String,
+    pub remote_model_path: String,
     pub device: cpal::Device,
     pub device_name: String,
     pub hotkey: EvdevKeyCode,
@@ -44,98 +33,34 @@ pub fn run_setup() -> Result<SetupConfig> {
 
     let mut terminal = ratatui::init();
 
-    // Screen 1: Backend selection
-    let backend_choices = vec![
-        "Local (this machine)".to_string(),
-        "Remote (SSH)".to_string(),
-    ];
-    let backend_idx = match select_screen(&mut terminal, "Select Backend", &backend_choices) {
-        Ok(idx) => idx,
+    // Screen 1: SSH target input
+    let ssh_target = match text_input_screen(&mut terminal, "SSH Target", "user@host") {
+        Ok(t) => t,
         Err(e) => {
             ratatui::restore();
             return Err(e);
         }
     };
 
-    let backend = if backend_idx == 0 {
-        // Local backend: scan local models
-        let models_dir = transcribe::default_models_dir();
-        let models = transcribe::scan_models(&models_dir)?;
-        if models.is_empty() {
+    // Screen 2: Discover remote models (temporarily restore terminal for SSH output)
+    ratatui::restore();
+    let models = remote::list_remote_models(&ssh_target)?;
+    if models.is_empty() {
+        bail!("No Whisper models found on remote machine {ssh_target}.");
+    }
+    terminal = ratatui::init();
+
+    let model_labels: Vec<String> = models.iter().map(|(name, _)| name.clone()).collect();
+    let model_idx = match select_screen(&mut terminal, "Select Remote Model", &model_labels) {
+        Ok(idx) => idx,
+        Err(e) => {
             ratatui::restore();
-            bail!(
-                "No Whisper models found in {}.\nDownload one:\n  wget -P {} https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
-                models_dir.display(),
-                models_dir.display()
-            );
-        }
-
-        let model_labels: Vec<String> = models
-            .iter()
-            .map(|(name, path)| {
-                let size = std::fs::metadata(path)
-                    .map(|m| format_size(m.len()))
-                    .unwrap_or_default();
-                format!("{name} ({size})")
-            })
-            .collect();
-        let model_idx =
-            match select_screen(&mut terminal, "Select Whisper Model", &model_labels) {
-                Ok(idx) => idx,
-                Err(e) => {
-                    ratatui::restore();
-                    return Err(e);
-                }
-            };
-
-        Backend::Local {
-            model_path: models[model_idx].1.clone(),
-        }
-    } else {
-        // Remote backend: get SSH target, then discover remote models
-        let ssh_target = match text_input_screen(
-            &mut terminal,
-            "SSH Target",
-            "user@host",
-        ) {
-            Ok(t) => t,
-            Err(e) => {
-                ratatui::restore();
-                return Err(e);
-            }
-        };
-
-        // Temporarily restore terminal to show SSH connection output
-        ratatui::restore();
-        let models = remote::list_remote_models(&ssh_target)?;
-        if models.is_empty() {
-            bail!("No Whisper models found on remote machine {ssh_target}.");
-        }
-        terminal = ratatui::init();
-
-        let model_labels: Vec<String> = models
-            .iter()
-            .map(|(name, _)| name.clone())
-            .collect();
-        let model_idx = match select_screen(
-            &mut terminal,
-            "Select Remote Model",
-            &model_labels,
-        ) {
-            Ok(idx) => idx,
-            Err(e) => {
-                ratatui::restore();
-                return Err(e);
-            }
-        };
-
-        Backend::Remote {
-            ssh_target,
-            remote_model_path: models[model_idx].1.clone(),
+            return Err(e);
         }
     };
+    let remote_model_path = models[model_idx].1.clone();
 
-    // Language selection
+    // Screen 3: Language selection
     let language_choices = vec![
         "English".to_string(),
         "Français".to_string(),
@@ -146,14 +71,13 @@ pub fn run_setup() -> Result<SetupConfig> {
         "日本語".to_string(),
         "中文".to_string(),
     ];
-    let language_idx =
-        match select_screen(&mut terminal, "Select Language", &language_choices) {
-            Ok(idx) => idx,
-            Err(e) => {
-                ratatui::restore();
-                return Err(e);
-            }
-        };
+    let language_idx = match select_screen(&mut terminal, "Select Language", &language_choices) {
+        Ok(idx) => idx,
+        Err(e) => {
+            ratatui::restore();
+            return Err(e);
+        }
+    };
     let language = match language_idx {
         0 => "en",
         1 => "fr",
@@ -166,7 +90,7 @@ pub fn run_setup() -> Result<SetupConfig> {
         _ => "en",
     };
 
-    // Push-to-Talk Key selection
+    // Screen 4: Push-to-Talk Key selection
     let hotkey_choices = vec![
         "F2".to_string(),
         "F3".to_string(),
@@ -203,7 +127,8 @@ pub fn run_setup() -> Result<SetupConfig> {
     };
 
     Ok(SetupConfig {
-        backend,
+        ssh_target,
+        remote_model_path,
         device,
         device_name,
         hotkey,
@@ -291,34 +216,23 @@ fn select_screen(
             frame.render_stateful_widget(list, area, &mut state);
         })?;
 
-        if event::poll(Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
-                    match key.code {
-                        KeyCode::Up => state.select_previous(),
-                        KeyCode::Down => state.select_next(),
-                        KeyCode::Enter => {
-                            if let Some(idx) = state.selected() {
-                                return Ok(idx);
-                            }
-                        }
-                        KeyCode::Char('q') | KeyCode::Esc => {
-                            bail!("Setup cancelled by user.");
-                        }
-                        _ => {}
+        if event::poll(Duration::from_millis(100))?
+            && let Event::Key(key) = event::read()?
+            && key.kind == KeyEventKind::Press
+        {
+            match key.code {
+                KeyCode::Up => state.select_previous(),
+                KeyCode::Down => state.select_next(),
+                KeyCode::Enter => {
+                    if let Some(idx) = state.selected() {
+                        return Ok(idx);
                     }
                 }
+                KeyCode::Char('q') | KeyCode::Esc => {
+                    bail!("Setup cancelled by user.");
+                }
+                _ => {}
             }
         }
-    }
-}
-
-fn format_size(bytes: u64) -> String {
-    if bytes >= 1_000_000_000 {
-        format!("{:.1} GB", bytes as f64 / 1_000_000_000.0)
-    } else if bytes >= 1_000_000 {
-        format!("{:.0} MB", bytes as f64 / 1_000_000.0)
-    } else {
-        format!("{:.0} KB", bytes as f64 / 1_000.0)
     }
 }

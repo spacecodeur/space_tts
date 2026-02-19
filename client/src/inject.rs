@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use std::io::Write;
 use std::process::{Child, Command, Stdio};
 
-use crate::warn;
+use space_tts_common::warn;
 
 pub trait TextInjector {
     fn type_text(&mut self, text: &str) -> Result<()>;

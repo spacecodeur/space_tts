@@ -2,9 +2,12 @@ use anyhow::{Result, bail};
 use std::io::{BufReader, BufWriter};
 use std::process::{Child, Command, Stdio};
 
-use crate::log::info;
-use crate::protocol::{ClientMsg, ServerMsg, read_server_msg, write_client_msg};
-use crate::transcribe::Transcriber;
+use space_tts_common::info;
+use space_tts_common::protocol::{ClientMsg, ServerMsg, read_server_msg, write_client_msg};
+
+pub trait Transcriber: Send {
+    fn transcribe(&mut self, audio_i16: &[i16]) -> Result<String>;
+}
 
 pub struct RemoteTranscriber {
     child: Child,
@@ -21,8 +24,7 @@ impl RemoteTranscriber {
                 "-o",
                 "BatchMode=yes",
                 ssh_target,
-                "space-stt",
-                "--server",
+                "space_tts_server",
                 "--model",
                 remote_model_path,
                 "--language",
@@ -92,10 +94,10 @@ impl Drop for RemoteTranscriber {
 }
 
 /// Discover models available on a remote machine.
-/// Executes `ssh <target> space-stt --list-models` and parses `name\tpath` lines.
+/// Executes `ssh <target> space_tts_server --list-models` and parses `name\tpath` lines.
 pub fn list_remote_models(ssh_target: &str) -> Result<Vec<(String, String)>> {
     let output = Command::new("ssh")
-        .args(["-o", "BatchMode=yes", ssh_target, "space-stt", "--list-models"])
+        .args(["-o", "BatchMode=yes", ssh_target, "space_tts_server", "--list-models"])
         .output()
         .map_err(|e| anyhow::anyhow!("Failed to run SSH: {e}"))?;
 

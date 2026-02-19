@@ -3,8 +3,7 @@ use evdev::{Device, EventType, KeyCode};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::log::debug;
-use crate::warn;
+use space_tts_common::{debug, warn};
 
 /// List all keyboard-like evdev devices (filtering out non-keyboards).
 fn find_keyboards() -> Vec<(std::path::PathBuf, String)> {
@@ -45,7 +44,6 @@ pub fn listen_all_keyboards(key: KeyCode, is_listening: Arc<AtomicBool>) -> Resu
     }
 
     for (path, name) in keyboards {
-        let key = key;
         let is_listening = is_listening.clone();
         let path_display = path.display().to_string();
 
@@ -71,12 +69,11 @@ pub fn listen_all_keyboards(key: KeyCode, is_listening: Arc<AtomicBool>) -> Resu
                             for event in events {
                                 if event.event_type() == EventType::KEY
                                     && event.code() == key.code()
+                                    && event.value() == 1
                                 {
-                                    if event.value() == 1 {
-                                        // Toggle on key press (not release, not repeat)
-                                        let prev = is_listening.load(Ordering::SeqCst);
-                                        is_listening.store(!prev, Ordering::SeqCst);
-                                    }
+                                    // Toggle on key press (not release, not repeat)
+                                    let prev = is_listening.load(Ordering::SeqCst);
+                                    is_listening.store(!prev, Ordering::SeqCst);
                                 }
                             }
                         }

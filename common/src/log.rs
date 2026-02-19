@@ -10,12 +10,14 @@ pub fn is_debug() -> bool {
     DEBUG.load(Ordering::SeqCst)
 }
 
+#[macro_export]
 macro_rules! info {
     ($($arg:tt)*) => {
         eprintln!($($arg)*)
     };
 }
 
+#[macro_export]
 macro_rules! debug {
     ($($arg:tt)*) => {
         if $crate::log::is_debug() {
@@ -24,9 +26,6 @@ macro_rules! debug {
     };
 }
 
-// #[macro_export] places the macro at the crate root, avoiding
-// the name-collision with the built-in #[warn] attribute that
-// prevents `pub(crate) use warn;` from compiling.
 #[macro_export]
 macro_rules! warn {
     ($($arg:tt)*) => {{
@@ -34,6 +33,3 @@ macro_rules! warn {
         eprintln!($($arg)*)
     }};
 }
-
-pub(crate) use debug;
-pub(crate) use info;

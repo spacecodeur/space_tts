@@ -1,22 +1,17 @@
 mod audio;
 mod hotkey;
 mod inject;
-mod log;
-mod protocol;
 mod remote;
-mod server;
-mod transcribe;
 mod tui;
 mod vad;
 
 use anyhow::Result;
 use inject::TextInjector;
-use log::{debug, info};
+use remote::Transcriber;
+use space_tts_common::{debug, info, warn};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use transcribe::Transcriber;
-use tui::Backend;
 
 fn check_input_group() {
     // Check if current user is in the 'input' group
@@ -50,117 +45,52 @@ fn check_input_group() {
     }
 }
 
-fn find_arg_value(args: &[String], flag: &str) -> Option<String> {
-    args.iter()
-        .position(|a| a == flag)
-        .and_then(|i| args.get(i + 1))
-        .cloned()
-}
-
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
     // Parse --debug flag
     if args.iter().any(|a| a == "--debug") {
-        log::set_debug(true);
+        space_tts_common::log::set_debug(true);
     }
 
-    // --list-models: print local models and exit
-    if args.iter().any(|a| a == "--list-models") {
-        let models_dir = transcribe::default_models_dir();
-        let models = transcribe::scan_models(&models_dir)?;
-        for (name, path) in &models {
-            println!("{name}\t{}", path.display());
-        }
-        return Ok(());
-    }
-
-    // --server: run as transcription server and exit
-    if args.iter().any(|a| a == "--server") {
-        let model = find_arg_value(&args, "--model")
-            .ok_or_else(|| anyhow::anyhow!("--server requires --model <path>"))?;
-        let language = find_arg_value(&args, "--language").unwrap_or_else(|| "en".to_string());
-        return server::run(&model, &language);
-    }
-
-    // Default: run as client (TUI)
     run_client()
 }
 
 fn run_client() -> Result<()> {
-    info!("Space STT — Local Speech-to-Text Terminal Injector");
+    info!("Space STT — Remote Speech-to-Text Terminal Injector");
     check_input_group();
 
     // 1. Run TUI setup
     let config = tui::run_setup()?;
 
-    match &config.backend {
-        Backend::Local { model_path } => {
-            let model_name = model_path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("unknown");
-            info!("  Backend:  Local");
-            info!("  Model:    {model_name}");
-            debug!("  Model path: {}", model_path.display());
-        }
-        Backend::Remote {
-            ssh_target,
-            remote_model_path,
-        } => {
-            info!("  Backend:  Remote ({ssh_target})");
-            info!("  Model:    {remote_model_path}");
-        }
-    }
+    info!("  Backend:  Remote ({0})", config.ssh_target);
+    info!("  Model:    {0}", config.remote_model_path);
     info!("  Device:   {}", config.device_name);
     info!("  Hotkey:   {:?}", config.hotkey);
     info!("  Language: {}", config.language);
     debug!("  XKB:      {}", config.xkb_layout);
 
     // 2. Set up transcription thread
-    info!("Loading model...");
+    info!("Connecting to remote server...");
 
     let (seg_tx, seg_rx) = crossbeam_channel::bounded::<Vec<i16>>(4);
     let (text_tx, text_rx) = crossbeam_channel::bounded::<String>(4);
 
-    let backend = config.backend;
+    let ssh_target = config.ssh_target.clone();
+    let remote_model_path = config.remote_model_path.clone();
     let language = config.language.clone();
 
     let transcribe_handle = std::thread::Builder::new()
         .name("transcriber".into())
         .spawn(move || {
-            let mut transcriber: Box<dyn Transcriber> = match &backend {
-                Backend::Local { model_path } => {
-                    let model_path = model_path.to_string_lossy().to_string();
-                    match transcribe::LocalTranscriber::new(&model_path, &language) {
-                        Ok(t) => {
-                            // Warm-up: transcribe 1s of silence to init GPU graph
-                            debug!("Warming up whisper...");
-                            let mut t = t;
-                            let silence = vec![0i16; 16000];
-                            let _ = t.transcribe(&silence);
-                            debug!("Warm-up complete.");
-                            Box::new(t)
-                        }
-                        Err(e) => {
-                            info!("Failed to load model: {e}");
-                            return;
-                        }
+            let mut transcriber: Box<dyn Transcriber> =
+                match remote::RemoteTranscriber::new(&ssh_target, &remote_model_path, &language) {
+                    Ok(t) => Box::new(t),
+                    Err(e) => {
+                        info!("Failed to connect to remote: {e}");
+                        return;
                     }
-                }
-                Backend::Remote {
-                    ssh_target,
-                    remote_model_path,
-                } => {
-                    match remote::RemoteTranscriber::new(ssh_target, remote_model_path, &language) {
-                        Ok(t) => Box::new(t),
-                        Err(e) => {
-                            info!("Failed to connect to remote: {e}");
-                            return;
-                        }
-                    }
-                }
-            };
+                };
 
             // Process segments from channel
             for segment in seg_rx {
@@ -242,7 +172,7 @@ fn run_client() -> Result<()> {
 
         if !listening {
             // Log audio flow periodically to confirm capture works
-            if chunk_count % 500 == 0 {
+            if chunk_count.is_multiple_of(500) {
                 debug!(
                     "  (audio flowing: {chunk_count} chunks received, {} samples/chunk)",
                     chunk.len()
@@ -256,7 +186,7 @@ fn run_client() -> Result<()> {
         // Resample to 16kHz mono
         let resampled = resample(&chunk);
         if resampled.is_empty() {
-            if listening_chunks % 100 == 0 {
+            if listening_chunks.is_multiple_of(100) {
                 debug!("  WARNING: resampler producing empty output");
             }
             continue;
