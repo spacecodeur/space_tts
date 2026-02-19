@@ -32,7 +32,15 @@ pub fn scan_models(dir: &Path) -> Result<Vec<(String, PathBuf)>> {
 }
 
 pub fn default_models_dir() -> PathBuf {
-    // Look for models/ directory relative to the executable, then fall back to CWD
+    // 1. XDG data dir: ~/.local/share/space_tts/models/
+    if let Ok(home) = std::env::var("HOME") {
+        let dir = PathBuf::from(home).join(".local/share/space_tts/models");
+        if dir.exists() {
+            return dir;
+        }
+    }
+
+    // 2. Next to executable
     if let Ok(exe) = std::env::current_exe()
         && let Some(parent) = exe.parent()
     {
@@ -40,7 +48,7 @@ pub fn default_models_dir() -> PathBuf {
         if dir.exists() {
             return dir;
         }
-        // Also check two levels up (target/release/../.. = project root)
+        // 3. Project root (target/release/../../models)
         if let Some(project_root) = parent.parent().and_then(|p| p.parent()) {
             let dir = project_root.join("models");
             if dir.exists() {
@@ -48,7 +56,37 @@ pub fn default_models_dir() -> PathBuf {
             }
         }
     }
+
+    // 4. Fallback: CWD
     PathBuf::from("models")
+}
+
+/// Resolve a model argument to an absolute path.
+/// Accepts: "small", "ggml-small.bin", or a full path.
+pub fn resolve_model_path(input: &str) -> PathBuf {
+    let path = Path::new(input);
+
+    // Already an existing absolute or relative path — use as-is
+    if path.exists() {
+        return path.to_path_buf();
+    }
+
+    let models_dir = default_models_dir();
+
+    // Try as filename: "ggml-small.bin"
+    let as_file = models_dir.join(input);
+    if as_file.exists() {
+        return as_file;
+    }
+
+    // Try as short name: "small" → "ggml-small.bin"
+    let as_ggml = models_dir.join(format!("ggml-{input}.bin"));
+    if as_ggml.exists() {
+        return as_ggml;
+    }
+
+    // Nothing found — return models_dir/input so the error message is clear
+    as_file
 }
 
 #[cfg(test)]

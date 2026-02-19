@@ -46,15 +46,15 @@ The script auto-detects your package manager (dnf, apt, pacman).
 Le client est léger : il capture l'audio, détecte la voix, et envoie les segments au serveur distant via SSH. Il injecte le texte transcrit dans la fenêtre active via dotool. **Pas besoin de whisper-rs ni de GPU.**
 
 ```bash
-# Installation (deps + dotool + build)
+# Installation (deps + dotool + build + install dans /usr/local/bin/)
 ./setup.sh install client
 
 # Build seul (si deps déjà installées)
 cargo build --release -p space_tts_client
 
 # Lancement
-./target/release/space_tts_client
-./target/release/space_tts_client --debug   # avec logs de debug
+space_tts_client
+space_tts_client --debug   # avec logs de debug
 ```
 
 Le TUI demande successivement :
@@ -63,47 +63,6 @@ Le TUI demande successivement :
 3. La langue
 4. La touche push-to-talk
 
-<details>
-<summary>Installation manuelle (sans setup.sh)</summary>
-
-#### Fedora (dnf)
-
-```bash
-sudo dnf install -y pkg-config alsa-lib-devel
-
-# dotool (text injection — build from source)
-sudo dnf install -y golang libxkbcommon-devel scdoc
-git clone https://git.sr.ht/~geb/dotool && cd dotool
-./build.sh && sudo ./build.sh install
-
-# Permissions (needed for evdev hotkey AND dotool uinput)
-sudo usermod -aG input $USER
-# Log out and back in for group change to take effect
-```
-
-#### Debian / Ubuntu (apt)
-
-```bash
-sudo apt install -y pkg-config libasound2-dev
-
-# dotool (text injection — build from source)
-sudo apt install -y golang libxkbcommon-dev scdoc
-git clone https://git.sr.ht/~geb/dotool && cd dotool
-./build.sh && sudo ./build.sh install
-
-# Permissions (needed for evdev hotkey AND dotool uinput)
-sudo usermod -aG input $USER
-# Log out and back in for group change to take effect
-```
-
-#### Build
-
-```bash
-cargo build --release -p space_tts_client
-```
-
-</details>
-
 ---
 
 ## Serveur (`space_tts_server`)
@@ -111,7 +70,7 @@ cargo build --release -p space_tts_client
 Le serveur charge un modèle Whisper et fait la transcription (GPU ou CPU). En production il est lancé automatiquement par le client via SSH, mais c'est un binaire indépendant.
 
 ```bash
-# Installation (deps + CUDA optionnel + modèle + build)
+# Installation (deps + CUDA optionnel + modèle + build + install dans /usr/local/bin/)
 ./setup.sh install server
 
 # Build seul (si deps déjà installées)
@@ -119,72 +78,46 @@ cargo build --release -p space_tts_server
 cargo build --release -p space_tts_server --features cuda   # avec GPU
 
 # Vérifier que les modèles sont détectés
-./target/release/space_tts_server --list-models
+space_tts_server --list-models
 
 # Lancer manuellement (stdin/stdout)
-./target/release/space_tts_server --model models/ggml-small.bin --language fr
-./target/release/space_tts_server --model models/ggml-small.bin --language fr --debug
+space_tts_server --model small --language fr
+space_tts_server --model small --language fr --debug
 ```
+
+`--model` accepte un nom court (`small`), un nom de fichier (`ggml-small.bin`) ou un chemin complet. `--list-models` affiche des commandes prêtes à copier-coller.
 
 En production, le client lance le serveur automatiquement via SSH :
 ```
-ssh <target> space_tts_server --model <path> --language <lang>
+ssh <target> space_tts_server --model small --language fr
 ```
-
-<details>
-<summary>Installation manuelle (sans setup.sh)</summary>
-
-#### Fedora (dnf)
-
-```bash
-# Build dependencies (whisper.cpp)
-sudo dnf install -y cmake gcc gcc-c++
-
-# CUDA (optional — GPU acceleration)
-sudo dnf install -y cuda-nvcc cuda-cudart-devel cuda-cudart-static cuda-culibos-devel cuda-cccl-devel
-```
-
-#### Debian / Ubuntu (apt)
-
-```bash
-# Build dependencies (whisper.cpp)
-sudo apt install -y cmake gcc g++
-
-# CUDA (optional — GPU acceleration)
-# Add NVIDIA repo first: https://developer.nvidia.com/cuda-downloads
-sudo apt install -y nvidia-cuda-toolkit libcublas-dev
-```
-
-#### Whisper Models
-
-Download at least one model into the `models/` directory at the project root:
-
-```bash
-mkdir -p models
-# Pick one:
-wget -P models https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin    # ~75 MB  — laptop CPU
-wget -P models https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin    # ~142 MB — CPU
-wget -P models https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin   # ~466 MB — mid-range GPU
-wget -P models https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin  # ~1.5 GB — strong GPU
-wget -P models https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin # ~3.1 GB — best quality
-```
-
-#### Build
-
-```bash
-# CPU only (default)
-cargo build --release -p space_tts_server
-
-# With CUDA GPU acceleration
-cargo build --release -p space_tts_server --features cuda
-```
-
-</details>
 
 ---
 
 ## Prérequis SSH
 
-- SSH sans mot de passe configuré (clé publique) vers le serveur
-- `space_tts_server` dans le `PATH` du serveur
-- Au moins un modèle Whisper (`ggml-*.bin`) dans le dossier `models/` du serveur
+Le client communique avec le serveur via SSH en mode non-interactif (pipe stdin/stdout). **La connexion par mot de passe ne fonctionne pas** — il faut une authentification par clé.
+
+### Configurer la clé SSH
+
+```bash
+# Générer une clé (si pas déjà fait)
+ssh-keygen -t ed25519
+
+# Copier la clé sur le serveur
+ssh-copy-id user@serveur
+
+# Vérifier que la connexion fonctionne sans mot de passe
+ssh user@serveur echo ok
+```
+
+Si la machine client et serveur sont la même (`localhost`) :
+```bash
+ssh-copy-id $USER@127.0.0.1
+```
+
+### Checklist
+
+- SSH sans mot de passe fonctionnel (`ssh user@serveur` ne demande rien)
+- `space_tts_server` dans le `PATH` du serveur (installé dans `/usr/local/bin/` par `setup.sh`)
+- Au moins un modèle Whisper (`ggml-*.bin`) dans `~/.local/share/space_tts/models/` (téléchargé par `setup.sh`)

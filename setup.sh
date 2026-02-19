@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-MODELS_DIR="$(cd "$(dirname "$0")" && pwd)/models"
+MODELS_DIR="$HOME/.local/share/space_tts/models"
 DOTOOL_REPO="https://git.sr.ht/~geb/dotool"
 HF_BASE="https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
 
@@ -107,7 +107,7 @@ install_cuda() {
 
     case "$pm" in
         dnf)
-            sudo dnf install -y cuda-nvcc cuda-cudart-devel cuda-cudart-static cuda-culibos-devel cuda-cccl-devel
+            sudo dnf install -y cuda-nvcc cuda-cudart-devel cuda-cudart-static cuda-culibos-devel cuda-cccl-devel libcublas-devel
             ;;
         apt)
             info "Make sure the NVIDIA CUDA repo is configured first."
@@ -254,7 +254,8 @@ build_project() {
         client)
             info "Building space_tts_client..."
             cargo build --release -p space_tts_client
-            info "Build complete: $dir/target/release/space_tts_client"
+            sudo cp "$dir/target/release/space_tts_client" /usr/local/bin/
+            info "Installed space_tts_client to /usr/local/bin/"
             ;;
         server)
             local build_flags="--release -p space_tts_server"
@@ -263,7 +264,8 @@ build_project() {
             fi
             info "Building space_tts_server ($build_flags)..."
             cargo build $build_flags
-            info "Build complete: $dir/target/release/space_tts_server"
+            sudo cp "$dir/target/release/space_tts_server" /usr/local/bin/
+            info "Installed space_tts_server to /usr/local/bin/"
             ;;
         *)
             local build_flags="--release --workspace"
@@ -272,7 +274,9 @@ build_project() {
             fi
             info "Building workspace ($build_flags)..."
             cargo build $build_flags
-            info "Build complete."
+            sudo cp "$dir/target/release/space_tts_server" /usr/local/bin/
+            sudo cp "$dir/target/release/space_tts_client" /usr/local/bin/
+            info "Installed binaries to /usr/local/bin/"
             ;;
     esac
 }
@@ -288,7 +292,15 @@ do_uninstall() {
     local dir
     dir=$(project_dir)
 
-    # 1. Remove build artifacts
+    # 1. Remove installed binaries
+    for bin in /usr/local/bin/space_tts_server /usr/local/bin/space_tts_client; do
+        if [ -f "$bin" ]; then
+            sudo rm -f "$bin"
+            info "Removed $bin"
+        fi
+    done
+
+    # 2. Remove build artifacts
     if [ -d "$dir/target" ]; then
         ask "Remove build artifacts ($dir/target)? [Y/n]"
         if [[ ! "$REPLY" =~ ^[nN]$ ]]; then
@@ -297,26 +309,26 @@ do_uninstall() {
         fi
     fi
 
-    # 2. Remove Whisper models
+    # 3. Remove Whisper models
     if [ -d "$MODELS_DIR" ]; then
         local model_size
         model_size=$(du -sh "$MODELS_DIR" 2>/dev/null | cut -f1)
         ask "Remove Whisper models ($MODELS_DIR, $model_size)? [y/N]"
         if [[ "$REPLY" =~ ^[yY]$ ]]; then
             rm -rf "$MODELS_DIR"
-            # Remove parent dir if empty
-            rmdir --ignore-fail-on-non-empty "$(dirname "$MODELS_DIR")" 2>/dev/null || true
+            # Remove parent dirs if empty
+            rmdir --ignore-fail-on-non-empty "$HOME/.local/share/space_tts" 2>/dev/null || true
             info "Models removed."
         fi
     fi
 
-    # 3. Remove dotool
+    # 4. Remove dotool
     ask "Remove dotool? [y/N]"
     if [[ "$REPLY" =~ ^[yY]$ ]]; then
         uninstall_dotool
     fi
 
-    # 4. Remove user from input group
+    # 5. Remove user from input group
     if id -nG "$USER" | grep -qw input; then
         ask "Remove user '$USER' from the 'input' group? [y/N]"
         if [[ "$REPLY" =~ ^[yY]$ ]]; then
@@ -325,7 +337,7 @@ do_uninstall() {
         fi
     fi
 
-    # 5. Remove system packages
+    # 6. Remove system packages
     local pm
     pm=$(detect_pkg_manager)
     ask "Remove system build dependencies ($pm)? [y/N]"
@@ -348,7 +360,7 @@ do_uninstall() {
         if [[ "$REPLY" =~ ^[yY]$ ]]; then
             case "$pm" in
                 dnf)
-                    sudo dnf remove -y cuda-nvcc cuda-cudart-devel cuda-cudart-static cuda-culibos-devel cuda-cccl-devel 2>/dev/null || true
+                    sudo dnf remove -y cuda-nvcc cuda-cudart-devel cuda-cudart-static cuda-culibos-devel cuda-cccl-devel libcublas-devel 2>/dev/null || true
                     ;;
                 apt)
                     sudo apt-get remove -y nvidia-cuda-toolkit libcublas-dev 2>/dev/null || true
@@ -393,7 +405,7 @@ do_install_client() {
     echo "========================================="
     info "Client setup complete!"
     echo
-    echo "  Run:  ./target/release/space_tts_client"
+    echo "  Run:  space_tts_client"
     echo
     if ! id -nG "$USER" | grep -qw input; then
         warn "Remember to log out/in for the 'input' group to take effect."
@@ -432,7 +444,7 @@ do_install_server() {
     echo "========================================="
     info "Server setup complete!"
     echo
-    echo "  Run:  ./target/release/space_tts_server --list-models"
+    echo "  Run:  space_tts_server --list-models"
     echo "========================================="
 }
 
@@ -470,8 +482,8 @@ do_install() {
     echo "========================================="
     info "Setup complete!"
     echo
-    echo "  Client:  ./target/release/space_tts_client"
-    echo "  Server:  ./target/release/space_tts_server --list-models"
+    echo "  Client:  space_tts_client"
+    echo "  Server:  space_tts_server --list-models"
     echo
     if ! id -nG "$USER" | grep -qw input; then
         warn "Remember to log out/in for the 'input' group to take effect."

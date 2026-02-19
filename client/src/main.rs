@@ -159,12 +159,13 @@ fn run_client() -> Result<()> {
         // PTT release detection: discard incomplete segment
         if was_listening && !listening {
             voice_detector.reset();
-            debug!("[PAUSED] (processed {listening_chunks} audio chunks while listening)");
+            info!("[PAUSED]");
+            debug!("  (processed {listening_chunks} audio chunks while listening)");
             listening_chunks = 0;
         }
 
         if !was_listening && listening {
-            debug!("[LISTENING]");
+            info!("[LISTENING]");
             listening_chunks = 0;
         }
 
