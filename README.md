@@ -45,7 +45,23 @@ The script auto-detects your package manager (dnf, apt, pacman).
 
 Le client est léger : il capture l'audio, détecte la voix, et envoie les segments au serveur distant via SSH. Il injecte le texte transcrit dans la fenêtre active via dotool. **Pas besoin de whisper-rs ni de GPU.**
 
-### Dépendances client
+```bash
+# Installation
+./setup.sh install client
+
+# Lancement
+./target/release/space_tts_client
+./target/release/space_tts_client --debug   # avec logs de debug
+```
+
+Le TUI demande successivement :
+1. La cible SSH (ex: `user@192.168.1.34`)
+2. Le modèle Whisper (découverte automatique sur le serveur)
+3. La langue
+4. La touche push-to-talk
+
+<details>
+<summary>Installation manuelle (sans setup.sh)</summary>
 
 #### Fedora (dnf)
 
@@ -77,32 +93,39 @@ sudo usermod -aG input $USER
 # Log out and back in for group change to take effect
 ```
 
-### Build client
+#### Build
 
 ```bash
 cargo build --release -p space_tts_client
 ```
 
-### Usage client
-
-```bash
-space_tts_client           # lance le TUI interactif
-space_tts_client --debug   # avec logs de debug
-```
-
-Le TUI demande successivement :
-1. La cible SSH (ex: `user@192.168.1.34`)
-2. Le modèle Whisper (découverte automatique sur le serveur)
-3. La langue
-4. La touche push-to-talk
+</details>
 
 ---
 
 ## Serveur (`space_tts_server`)
 
-Le serveur est lourd : il charge un modèle Whisper et fait la transcription GPU. Il est lancé automatiquement par le client via SSH — pas besoin de le démarrer manuellement.
+Le serveur charge un modèle Whisper et fait la transcription (GPU ou CPU). En production il est lancé automatiquement par le client via SSH, mais c'est un binaire indépendant.
 
-### Dépendances serveur
+```bash
+# Installation (deps + CUDA optionnel + modèle + build)
+./setup.sh install server
+
+# Vérifier que les modèles sont détectés
+./target/release/space_tts_server --list-models
+
+# Lancer manuellement (stdin/stdout)
+./target/release/space_tts_server --model models/ggml-small.bin --language fr
+./target/release/space_tts_server --model models/ggml-small.bin --language fr --debug
+```
+
+En production, le client lance le serveur automatiquement via SSH :
+```
+ssh <target> space_tts_server --model <path> --language <lang>
+```
+
+<details>
+<summary>Installation manuelle (sans setup.sh)</summary>
 
 #### Fedora (dnf)
 
@@ -125,7 +148,7 @@ sudo apt install -y cmake gcc g++
 sudo apt install -y nvidia-cuda-toolkit libcublas-dev
 ```
 
-### Whisper Models
+#### Whisper Models
 
 Download at least one model into the `models/` directory at the project root:
 
@@ -139,7 +162,7 @@ wget -P models https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-me
 wget -P models https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin # ~3.1 GB — best quality
 ```
 
-### Build serveur
+#### Build
 
 ```bash
 # CPU only (default)
@@ -149,18 +172,7 @@ cargo build --release -p space_tts_server
 cargo build --release -p space_tts_server --features cuda
 ```
 
-### Usage serveur
-
-```bash
-space_tts_server --list-models                            # liste les modèles locaux (name\tpath)
-space_tts_server --model <path> --language fr              # lance le serveur (stdin/stdout)
-space_tts_server --model <path> --language fr --debug      # avec logs de debug
-```
-
-En pratique, le serveur est lancé automatiquement par le client via SSH :
-```
-ssh <target> space_tts_server --model <path> --language <lang>
-```
+</details>
 
 ---
 
