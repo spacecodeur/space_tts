@@ -61,7 +61,38 @@ pub fn run_setup() -> Result<SetupConfig> {
         }
     };
 
-    // Screen 2: Push-to-Talk Key
+    // Screen 2: Language
+    let language_choices = vec![
+        "English".to_string(),
+        "Français".to_string(),
+        "Deutsch".to_string(),
+        "Español".to_string(),
+        "Italiano".to_string(),
+        "Português".to_string(),
+        "日本語".to_string(),
+        "中文".to_string(),
+    ];
+    let language_idx =
+        match select_screen(&mut terminal, "Select Language", &language_choices) {
+            Ok(idx) => idx,
+            Err(e) => {
+                ratatui::restore();
+                return Err(e);
+            }
+        };
+    let language = match language_idx {
+        0 => "en",
+        1 => "fr",
+        2 => "de",
+        3 => "es",
+        4 => "it",
+        5 => "pt",
+        6 => "ja",
+        7 => "zh",
+        _ => "en",
+    };
+
+    // Screen 3: Push-to-Talk Key
     let hotkey_choices = vec![
         "F2".to_string(),
         "F3".to_string(),
@@ -104,7 +135,7 @@ pub fn run_setup() -> Result<SetupConfig> {
         device_name,
         model_path,
         hotkey,
-        language: "fr".to_string(),
+        language: language.to_string(),
         xkb_layout: inject::detect_xkb_layout(),
     })
 }

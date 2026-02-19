@@ -41,7 +41,7 @@ impl Transcriber {
         params.set_suppress_nst(true);
         params.set_no_speech_thold(0.4);
         // Initial prompt helps Whisper stay in the target language and use proper vocabulary
-        params.set_initial_prompt("Bonjour, ceci est une transcription en français.");
+        params.set_initial_prompt(initial_prompt(&self.language));
 
         if let Err(e) = self.state.full(params, &audio_f32) {
             eprintln!("Transcription error: {e}");
@@ -146,6 +146,19 @@ fn filter_hallucinations(text: &str) -> String {
     }
 
     result.trim().trim_end_matches(['.', '!', '?', ',']).trim().to_string()
+}
+
+fn initial_prompt(language: &str) -> &'static str {
+    match language {
+        "fr" => "Bonjour, ceci est une transcription en français.",
+        "de" => "Hallo, dies ist eine Transkription auf Deutsch.",
+        "es" => "Hola, esta es una transcripción en español.",
+        "it" => "Ciao, questa è una trascrizione in italiano.",
+        "pt" => "Olá, esta é uma transcrição em português.",
+        "ja" => "こんにちは、これは日本語の文字起こしです。",
+        "zh" => "你好，这是中文转录。",
+        _ => "Hello, this is an English transcription.",
+    }
 }
 
 pub fn default_models_dir() -> PathBuf {
