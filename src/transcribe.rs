@@ -7,12 +7,16 @@ use whisper_rs::{
     convert_integer_to_float_audio,
 };
 
-pub struct Transcriber {
+pub trait Transcriber: Send {
+    fn transcribe(&mut self, audio_i16: &[i16]) -> Result<String>;
+}
+
+pub struct LocalTranscriber {
     state: WhisperState,
     language: String,
 }
 
-impl Transcriber {
+impl LocalTranscriber {
     pub fn new(model_path: &str, language: &str) -> Result<Self> {
         let ctx = WhisperContext::new_with_params(model_path, WhisperContextParameters::new())
             .map_err(|e| anyhow::anyhow!("Failed to load whisper model: {e}"))?;
@@ -24,8 +28,10 @@ impl Transcriber {
             language: language.to_string(),
         })
     }
+}
 
-    pub fn transcribe(&mut self, audio_i16: &[i16]) -> Result<String> {
+impl Transcriber for LocalTranscriber {
+    fn transcribe(&mut self, audio_i16: &[i16]) -> Result<String> {
         // Convert i16 to f32
         let mut audio_f32 = vec![0.0f32; audio_i16.len()];
         convert_integer_to_float_audio(audio_i16, &mut audio_f32)

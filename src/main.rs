@@ -8,6 +8,7 @@ mod vad;
 
 use anyhow::Result;
 use inject::TextInjector;
+use transcribe::Transcriber;
 use log::{debug, info};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -85,7 +86,7 @@ fn main() -> Result<()> {
     let transcribe_handle = std::thread::Builder::new()
         .name("transcriber".into())
         .spawn(move || {
-            let mut transcriber = match transcribe::Transcriber::new(&model_path, &language) {
+            let mut transcriber = match transcribe::LocalTranscriber::new(&model_path, &language) {
                 Ok(t) => t,
                 Err(e) => {
                     info!("Failed to load model: {e}");
