@@ -32,7 +32,6 @@ fn check_input_group() {
 
     // Check /dev/uinput access
     match std::fs::OpenOptions::new()
-        .read(true)
         .write(true)
         .open("/dev/uinput")
     {

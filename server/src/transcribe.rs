@@ -46,7 +46,7 @@ impl Transcriber for LocalTranscriber {
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
         params.set_suppress_nst(true);
-        params.set_no_speech_thold(0.4);
+        params.set_no_speech_thold(0.6);
         // Initial prompt helps Whisper stay in the target language and use proper vocabulary
         params.set_initial_prompt(initial_prompt(&self.language));
 
@@ -71,45 +71,57 @@ impl Transcriber for LocalTranscriber {
 /// Filter out common Whisper hallucinations (YouTube subtitle artifacts).
 /// Returns empty string if the entire text is a hallucination.
 fn filter_hallucinations(text: &str) -> String {
-    const HALLUCINATIONS: &[&str] = &[
+    // Long, specific patterns — safe to match anywhere (trailing match)
+    const TRAILING_HALLUCINATIONS: &[&str] = &[
         "merci d'avoir regardé",
         "merci d'avoir regardé la vidéo",
         "merci d'avoir regardé cette vidéo",
         "merci de votre attention",
         "sous-titres réalisés par",
-        "sous-titres par",
-        "sous-titrage st'",
-        "thanks for watching",
-        "thank you for watching",
-        "subscribe",
+        "sous-titrage société radio-canada",
         "like and subscribe",
         "please subscribe",
+        "thanks for watching",
+        "thank you for watching",
     ];
 
-    let lower = text.to_lowercase();
+    // Short/generic patterns — only discard if they are the ENTIRE output
+    const FULLMATCH_HALLUCINATIONS: &[&str] = &[
+        "sous-titres par",
+        "sous-titrage st'",
+        "sous-titrage",
+        "société radio-canada",
+        "subscribe",
+        "merci",
+    ];
 
-    // If the entire text is a hallucination, discard it
-    for pattern in HALLUCINATIONS {
-        if lower.trim_end_matches(['.', '!', '?', ' ']) == *pattern {
+    if is_repetitive(&text.to_lowercase()) {
+        return String::new();
+    }
+
+    let lower = text.to_lowercase();
+    let stripped = lower.trim_end_matches(['.', '!', '?', ' ', ',']);
+
+    // Full-match check: both lists
+    for pattern in TRAILING_HALLUCINATIONS.iter().chain(FULLMATCH_HALLUCINATIONS.iter()) {
+        if stripped == *pattern {
             return String::new();
         }
     }
 
-    // Strip trailing hallucination appended after real speech
+    // Trailing match: only long specific patterns
     let mut result = text.to_string();
-    for pattern in HALLUCINATIONS {
+    for pattern in TRAILING_HALLUCINATIONS {
         if let Some(pos) = lower.find(pattern) {
             result.truncate(pos);
         }
     }
 
-    // Also strip trailing lone "Merci !" / "Merci!" often appended
+    // Strip trailing lone "Merci !" / "Merci!" often appended
     let trimmed = result.trim().trim_end_matches('!').trim();
     if trimmed.ends_with("Merci") || trimmed.ends_with("merci") {
-        // Only strip if "Merci" is at the very end and preceded by space/punctuation
         if let Some(pos) = result.to_lowercase().rfind("merci") {
             let before = &result[..pos];
-            // Strip only if preceded by punctuation or space (not part of a real word)
             if before.is_empty()
                 || before.ends_with(' ')
                 || before.ends_with('.')
@@ -122,7 +134,80 @@ fn filter_hallucinations(text: &str) -> String {
         }
     }
 
-    result.trim().trim_end_matches(['.', '!', '?', ',']).trim().to_string()
+    let result = result.trim().trim_end_matches(['.', '!', '?', ',']).trim().to_string();
+
+    // Re-check: what remains after truncation may itself be a hallucination
+    if result.is_empty() {
+        return String::new();
+    }
+    let remaining = result.to_lowercase();
+    let remaining_stripped = remaining.trim_end_matches(['.', '!', '?', ' ', ',']);
+    for pattern in FULLMATCH_HALLUCINATIONS {
+        if remaining_stripped == *pattern {
+            return String::new();
+        }
+    }
+    if is_repetitive(&remaining) {
+        return String::new();
+    }
+
+    result
+}
+
+/// Detect text that is just the same word or short phrase repeated.
+/// Catches "MerciMerciMerci", "merci merci merci", "thank you. thank you. thank you." etc.
+fn is_repetitive(text: &str) -> bool {
+    let cleaned: String = text
+        .chars()
+        .filter(|c| c.is_alphanumeric() || c.is_whitespace())
+        .collect();
+    let words: Vec<&str> = cleaned.split_whitespace().collect();
+    if words.is_empty() {
+        return true;
+    }
+
+    // Check if the entire string (without spaces) is one short word repeated 3+ times
+    // e.g. "mercimercimerci" = "merci" × 3
+    let joined: String = words.join("");
+    for len in 1..=joined.len().min(12) {
+        if joined.len() % len != 0 {
+            continue;
+        }
+        let repeats = joined.len() / len;
+        if repeats >= 3 && joined == joined[..len].repeat(repeats) {
+            return true;
+        }
+    }
+
+    // Check if the same word appears 3+ times in a row
+    // e.g. "merci merci merci"
+    if words.len() >= 3 {
+        let mut run = 1;
+        for i in 1..words.len() {
+            if words[i] == words[i - 1] {
+                run += 1;
+                if run >= 3 {
+                    return true;
+                }
+            } else {
+                run = 1;
+            }
+        }
+    }
+
+    // Check if the same 2-3 word phrase repeats 3+ times
+    // e.g. "thank you thank you thank you"
+    for phrase_len in 2..=3 {
+        if words.len() >= phrase_len * 3 {
+            let phrase = &words[..phrase_len];
+            let repeats = words.chunks(phrase_len).take_while(|c| *c == phrase).count();
+            if repeats >= 3 {
+                return true;
+            }
+        }
+    }
+
+    false
 }
 
 fn initial_prompt(language: &str) -> &'static str {
@@ -147,6 +232,17 @@ mod tests {
         assert_eq!(filter_hallucinations("Merci d'avoir regardé la vidéo!"), "");
         assert_eq!(filter_hallucinations("Merci d'avoir regardé."), "");
         assert_eq!(filter_hallucinations("Thanks for watching"), "");
+        assert_eq!(filter_hallucinations("Sous-titrage Société Radio-Canada"), "");
+        assert_eq!(filter_hallucinations("Sous-titrage"), "");
+        assert_eq!(filter_hallucinations("Subscribe"), "");
+    }
+
+    #[test]
+    fn filter_repetitive_hallucination() {
+        assert_eq!(filter_hallucinations("MerciMerciMerci"), "");
+        assert_eq!(filter_hallucinations("merci merci merci"), "");
+        assert_eq!(filter_hallucinations("Thank you. Thank you. Thank you."), "");
+        assert_eq!(filter_hallucinations("you you you you"), "");
     }
 
     #[test]
@@ -154,6 +250,10 @@ mod tests {
         assert_eq!(
             filter_hallucinations("Bonjour tout le monde. Merci d'avoir regardé la vidéo!"),
             "Bonjour tout le monde"
+        );
+        assert_eq!(
+            filter_hallucinations("Bonjour. Sous-titrage Société Radio-Canada"),
+            "Bonjour"
         );
     }
 
@@ -179,6 +279,15 @@ mod tests {
         assert_eq!(
             filter_hallucinations("Je te remercie pour ton aide"),
             "Je te remercie pour ton aide"
+        );
+        // Short patterns used in real speech must NOT be stripped mid-sentence
+        assert_eq!(
+            filter_hallucinations("Je veux activer le sous-titrage automatique"),
+            "Je veux activer le sous-titrage automatique"
+        );
+        assert_eq!(
+            filter_hallucinations("I need to subscribe to the service"),
+            "I need to subscribe to the service"
         );
     }
 }

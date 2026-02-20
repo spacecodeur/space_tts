@@ -23,7 +23,6 @@ impl Injector {
             );
         }
         match std::fs::OpenOptions::new()
-            .read(true)
             .write(true)
             .open(uinput)
         {
